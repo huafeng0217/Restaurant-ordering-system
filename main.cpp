@@ -7,8 +7,22 @@
 #include<fstream>
 #include<sstream>
 #include<chrono>
+#include<iomanip>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 using namespace std;
+
+// 设置控制台编码的函数
+void setConsoleUTF8() {
+#ifdef _WIN32
+    // 设置控制台输出为UTF-8
+    SetConsoleOutputCP(65001);
+    // 设置控制台输入为UTF-8
+    SetConsoleCP(65001);
+#endif
+}
 
 
 class Dish{
@@ -433,47 +447,435 @@ class Order {
 private:
     int orderid;//订单号
     int tablenumber;//订单桌
-    string status;//订单状态
+    orderstatus status;//订单状态
     chrono::system_clock::time_point createtime;//这是c++的现代时间库chrono定义了一个时间点变量，保存订单的创建时间
-    map<int,pair<Dish*,int>>ordereddfood;//储存点的菜品号，菜品以及数量
+    map<int,pair<Dish*,int>>orderedfood;//储存点的菜品号，菜品以及数量
 public:
     Order(int id,int tablenum) {
         this->orderid=id;
         this->tablenumber=tablenum;
+        createtime=chrono::system_clock::now();
+        status=orderstatus::Pending;
     }
+    ~Order(){}
     bool addfood(Dish* c,int number) {
-            orderedfood
+        if (!c) {
+            cout<<"菜单中该食物不存在"<<endl;
+            return false;
+        }
+        if (number<=0) {
+            cout<<"食物份量不能小于0"<<endl;
+            return false;
+        }
+        if (number>c->stock) {
+            cout<<"所点食物份量太多，库存不足"<<endl;
+            cout<<"当前库存数为："<<c->stock<<endl;
+            return false;
+        }
+        //添加或更新菜品数量
+        if (orderedfood.find(c->id)!=orderedfood.end()){//这里有一个发现了自己之前的一个误区：map容器的map[first]是索引到second的
+            //而自己之前一直以为是索引到first和second整个元素；
+            //只有map.find(c->id)才是索引到整个元素组;
+            orderedfood[c->id].second+=number;//增加菜品数量
+        }
+        else {
+            //新添加菜品
+            orderedfood[c->id]=make_pair(c,number);
+        }
+        cout<<"已添加"<<number<<"份"<<c->name<<"到订单"<<endl;
+        return true;
+    }
+
+    bool removefood(Dish* c) {//通过Dish指针移除菜品
+        if (status != orderstatus::Pending) {
+            cout<<"该菜品正在制作中,无法修改！"<<endl;
+            return false;
+        }
+        if (orderedfood.find(c->id)==orderedfood.end()) {
+            cout<<"订单中没有该菜品，请确认您是否下单成功"<<endl;
+            return false;
+        }
+        auto it=orderedfood.find(c->id);
+        orderedfood.erase(it);
+        cout<<"菜品"<<c->name<<"已删除"<<endl;
+        return true;
+    }
+    bool removefood(int id) {//通过Dishid移除菜品
+        auto it=orderedfood.find(id);
+        if (it==orderedfood.end()) {
+            cout<<"订单中没有该菜品，请确认您是否下单成功"<<endl;
+            return false;
+        }
+        if (status != orderstatus::Pending) {
+            cout<<"该菜品正在制作中,无法修改！"<<endl;
+            return false;
+        }
+        cout<<"菜品"<<it->second.first->name<<"已删除"<<endl;
+        orderedfood.erase(it);
+        return true;
+
+    }
+    void clearorder() {//订单清空方法，ordermanager使用
+        orderedfood.clear();
+    }
+    bool isempty() {//检查是否为空的方法
+        return orderedfood.empty();
+    }
+    bool updatestock() {//更新库存中的菜品数量
+        if (status ==orderstatus::Preparing) {//当前仅当订单状态为制作中才需要减少库存
+            for (const auto& c:orderedfood) {
+                auto it=c.second.first;
+                it->stock-=c.second.second;
+            }
+        }
+        cout<<"更新库存成功"<<endl;
+        return true;
+    }
+    double calaulatetotal() {
+        //计算总价格
+        double total=0.0;
+        for (const auto& c:orderedfood) {
+            auto it=c.second.first;
+            total+=it->price*c.second.second;
+        }
+        return total;
+    }
+    orderstatus getstatus() {//获取status,在后面的ordermanager中使用
+        return status;
+    }
+    void setstatus(orderstatus status) {//设置status,orderstatus使用
+        this->status = status;
+    }
+
+    void setpreparing() {//设置订单状态为准备中
+            updatestock();
+            status=orderstatus::Preparing;
+            cout<<"订单状态变化：食物正在制作中，请您耐心等待"<<endl;
+
+    }
+    void setcompleted() {//设置订单状态为已完成
+            status=orderstatus::Completed;
+            cout<<"订单状态变化：您的订单已完成，感谢您的品尝"<<endl;
+
+    }
+    void setcanceled() {//设置订单状态为取消
+        status=orderstatus::Canceled;
+        orderedfood.clear();
+        cout<<"订单状态变化：订单已被取消"<<endl;
+    }
+    void statuscheck() {//查看订单状态
+        if (status==orderstatus::Pending) {cout<<"您的订单正在等候处理中"<<endl;}
+        else if (status==orderstatus::Preparing) {cout<<"您的菜品正在制作中，请您耐心等待"<<endl;}
+        else if (status==orderstatus::Completed){cout<<"您所点菜品已经全部上齐，订单已完成"<<endl;}
+        else{cout<<"您的订单已取消"<<endl;}
+    }
+    int getorderid() {//获取订单号
+        return orderid;
+    }
+    int gettablenumber() {//获取订单桌牌号
+        return tablenumber;
+    }
+    string gettime() {//获取时间
+       return timetostring(createtime);
+    }
+    const map<int,pair<Dish*,int>>&getorderedfood() {
+        return orderedfood;
+    }
+
+    void displayorder() {
+        cout << "\n=================================" << endl;
+        cout << "           订单详情" << endl;
+        cout << "=================================" << endl;
+        cout << "订单号: " << orderid << " | 桌号: " << tablenumber << endl;
+        cout << "下单时间: " << gettime() << endl;
+        cout << "---------------------------------" << endl;
+        cout << "菜品清单:" << endl;
+        cout << "---------------------------------" << endl;
+
+        if (orderedfood.empty()) {
+            cout << "   订单为空" << endl;
+        } else {
+            int index = 1;
+            for (const auto& c : orderedfood) {
+                Dish* dish = c.second.first;
+                int quantity = c.second.second;
+                double subtotal = dish->price * quantity;
+
+                cout << "   " << index++ << ". " << dish->name
+                     << " × " << quantity<<"   "
+                     << "￥" << subtotal << endl;
+            }
+        }
+
+        cout << "---------------------------------" << endl;
+        cout << "总计: ￥" << calaulatetotal() << " 元" << endl;
+        cout << "状态: ";
+        statuscheck();
+        cout << "=================================" << endl;
     }
 
 
 
 
+private:string timetostring(chrono::system_clock::time_point time) {
 
-
-
-
-
+    time_t t=chrono::system_clock::to_time_t(time);//time为C++的现代时间类型，现在转换为C的传统时间类型time_t，也叫c风格时间戳
+    tm t1;
+    localtime_s(&t1,&t);//这里是将t时间进行分解为本地时间的分解结构
+    /*tm结构体包含：struct tm {
+    int tm_sec;   // 秒 [0-59]
+    int tm_min;   // 分 [0-59]
+    int tm_hour;  // 时 [0-23]
+    int tm_mday;  // 日 [1-31]
+    int tm_mon;   // 月 [0-11] （0=1月）
+    int tm_year;  // 年（从1900开始）
+    int tm_wday;  // 星期 [0-6]（0=周日）
+     ... 其他字段*/
+    stringstream ss;
+    ss<<put_time(&t1,"%Y-%m-%d %H:%M:%S");
+    //put_time函数是将tm*时间结构格式化为指定的字符串格式
+    //put_time(const tm* tmb,const char* fmt);
+    //fmt有：%Y,4位数年份；%y,2位数年份；%m,2位数月份；%H,24小时制小时；%M，分钟；%S,秒钟；
+    return ss.str();
+};
 };
 
+//订单管理类
+class OrderManager {
+private:
+    vector<Order>orders;//储存所有订单的容器
+    Menumanager* menumanager;//菜单管理器指针
+    int nextid;//订单ID生成器
+public:
+    OrderManager(Menumanager* menumanager) {
+        this->menumanager=menumanager;
+        nextid=1;
+    }
+    ~OrderManager() {}
+    //订单管理
+    Order* createorder(int tablenumber) {//创建订单
+        orders.emplace_back(nextid,tablenumber);//emplace_back()直接在vector中构造，push_back拷贝构造
+        Order* neworder=&orders.back();
+        nextid++;
+        cout<<"创建新订单，订单ID:"<<neworder->getorderid()<<",桌号："<<neworder->gettablenumber()<<endl;
+        return neworder;
+    }
+    Order* getorder(int id) {//查找订单
+        for (auto& order:orders) {
+            if (order.getorderid()==id)return &order;
+        }
+        return nullptr;
+    }
+    bool deleteorder(int id) {
+        if (getorder(id)==nullptr) {
+            cout<<"订单不存在"<<endl;
+            return false;
+        }
+        else {
+            /*
+             这里犯了一个错误：
+             一开始自己想要用getorder(id)来获取订单的指针然后用orders的erase来实现订单的删除
+             但这样子是不对的，vector容器的erase()是要配合其迭代器来使用的，迭代器我之前只将其浅显的理解为普通指针的替换
+             实际上迭代器可以算是一个智能指针，包含了一个元素在vector中的具体位置，让vector知道如何移动后续元素和内部大小信息
+             而指针就只是指向了一块内存地址，无法传递更多的信息
+             eg.下面代码的it->getorderid()==(*it)->getorderid()这里就是迭代器的重载的*运算符了使得it可以直接使用成员函数
+                而不是通过一个指针的解引用
+                */
 
+            for(auto it=orders.begin();it!=orders.end();it++) {
+                if (it->getorderid()==id){
+                    orders.erase(it);
+                    cout<<"成功删除订单："<<id<<endl;
+                    return true;
+                }
+            }
+        }
+    }
 
+    //订单操作
+    bool addfoodtoorder(int orderid,int dishid,int quantity=1) {//将菜加入订单中
+        if (getorder(orderid)==nullptr) {cout<<"该订单号不存在"<<endl;return false;}
+        if (menumanager->getdish(dishid)==nullptr){cout<<"该菜品不存在"<<endl;return false;}
+        return getorder(orderid)->addfood(menumanager->getdish(dishid),quantity);
 
+    }
+    bool removefoodfromorder(int orderid,int dishid) {//从订单中移除菜品
+        if (!getorder(orderid)){cout<<"该订单号不存在"<<endl;return false;}
+        if (!menumanager->getdish(dishid)){cout<<"该菜品不存在"<<endl;return false;}
+        return getorder(orderid)->removefood(menumanager->getdish(dishid));
 
+    }
+    bool updatefoodinorder(int orderid,int dishid,int quantity) {
+        if (!getorder(orderid)){cout<<"该订单号不存在"<<endl;return false;}
+        if (!menumanager->getdish(dishid)){cout<<"该菜品不存在"<<endl;return false;}
+        getorder(orderid)->removefood(menumanager->getdish(dishid));//先移除食物（食物数量清0）
+        return getorder(orderid)->addfood(menumanager->getdish(dishid),quantity);//再增加食物
+    }
 
+    //订单状态操作
+    bool setorderpreparing(int orderid) {//订单状态设置为准备中
+        getorder(orderid)->setpreparing();
+    }
+    bool setorderompleted(int orderid) {//订单状态设置为已完成
+        getorder(orderid)->setcompleted();
+    }
+    bool setordercanceled(int orderid) {//订单状态设置为被取消
+        getorder(orderid)->setcanceled();
+    }
 
+    //订单查询
+    vector<Order*> getordersbystatus(orderstatus status) {//按照订单状态查询订单
+        vector<Order*> results;
+        for (auto &c:orders) {
+            if (c.getstatus()==status) {results.push_back(&c);}
+        }
+        return results;
+    }
+    vector<Order*>getordersbyorderid(int orderid) {//按照桌号查找订单
+        vector<Order*> results;
+        for (auto &c:orders) {
+            if (c.getorderid()==orderid) {results.push_back(&c);}
+        }
+        return results;
+    }
+    vector<Order*>getallorders() {//获取所有订单
+        vector<Order*> results;
+        for (auto &c:orders) {
+            results.push_back(&c);
+        }
+        return results;
+    }
+    vector<Order*>getpendingorders() {//获取待处理的订单
+        vector<Order*> results;
+        for (auto &c:orders) {
+            if (c.getstatus()==orderstatus::Pending) {
+                results.push_back(&c);
+            }
+        }
+        return results;
+    }
+    vector<Order*>getpreparingorders() {//获取准备中的订单
+        vector<Order*> results;
+        for (auto &c:orders) {
+            if (c.getstatus()==orderstatus::Pending) {results.push_back(&c);}
+        }
+        return results;
+    }
+    vector<Order*>getcompletedorders() {//获取已完成的订单
+        vector<Order*> results;
+        for (auto &c:orders) {
+            if (c.getstatus()==orderstatus::Completed) {results.push_back(&c);}
+        }
+        return results;
+    }
+    vector<Order*>getcanceledorders() {//获取被取消的订单
+        vector<Order*> results;
+        for (auto &c:orders) {
+            if (c.getstatus()==orderstatus::Canceled) {results.push_back(&c);}
+        }
+        return results;
+    }
 
+    //统计收入
+    double calaulatetotalrevenue() {//统计总收入
+        double total=0.0;
+        for (auto &c:orders) {
+            total+=c.calaulatetotal();
+        }
+        return total;
+    }
+    double calculattodayrevenue() {//统计当日总收入
+        double today=0.0;
+        auto time=chrono::system_clock::now();
+        time_t now=chrono::system_clock::to_time_t(time);
+        tm t1;
+        localtime_s(&t1,&now);
+        stringstream ss;
+        ss<<put_time(&t1,"%Y:%m:%d");
+        for (auto &c:orders) {
+             if (c.gettime().find(ss.str())!=string::npos) {//查找订单时间是否存在今日日期字符串
+                 today+=c.calaulatetotal();
+             }
+        }
+        return today;
+    }
+    // map<int,int>getdishsalesranking() {
+    //     map<int,int>results;
+    //     for (auto &c:orders) {
+    //         results[c.getorderedfood()->first]+=c.getorderedfood().second.second;
+    //     }
+    // }
+    void displayordersstatic() {//显示订单数据统计
+        int totalcount=orders.size();
+        double revenue1=calaulatetotalrevenue();
+        double revenue2=calculattodayrevenue();
+        cout << "\n=== 订单统计 ===" << endl;
+        cout << "总订单数: " << totalcount << endl;
+        cout << "总收入: ￥" << revenue1 << " 元" << endl;
+        cout << "今日收入：￥"<<revenue2<<"元"<<endl;
+        cout << "平均订单金额: ￥" << (totalcount > 0 ? revenue1 / totalcount : 0) << " 元" << endl;
+    }
 
+    //文件操作
+    bool savetofile(string filename="orders.txt") {
+        ofstream fout;
+        fout.open(filename,ios::out);
+        if (!fout.is_open()) {
+            cout<<"文件"<<filename<<"打开失败"<<endl;
+            return false;
+        }
+        fout<<nextid<<endl;
+        for (auto &c:orders) {
+            fout<<c.getorderid()<<","
+                <<c.gettablenumber()<<","
+                <<c.gettime()<<endl;
+            for (auto& d:c.getorderedfood()) {
+                fout<<d.first<<":"<<d.second.second<<endl;
+            }
+            fout<<endl;
+        }
+        fout.close();
+        cout<<"订单数据已经保存到："<<filename<<endl;
+        return true;
+    }
+    bool  loadfromfile(string filename="orders.txt") {
+        ifstream fin;
+        fin.open(filename,ios::in);
+        if (!fin.is_open()) {
+            cout<<"无法打开"<<filename<<endl;
+        }
+        orders.clear();
+        string line;
+        getline(fin,line);
+        nextid=stoi(line);
+        int orderid,tablenumber;
+        while (getline(fin,line)) {
+            if (line.empty())continue;
+            stringstream ss(line);
+            string idstr,tablestr,timestr;
+            getline(ss,idstr,',');
+            getline(ss,tablestr,',');
+            getline(ss,timestr,',');
+            orderid=stoi(idstr);
+            tablenumber=stoi(tablestr);
+            orders.emplace_back(orderid,tablenumber);
+            Order& od=orders.back();
+            //读取菜品数据
+            if (getline(fin,line)){
+                stringstream ss1(line);
+                string dishstr;
+                while(getline(ss1,dishstr,';')) {
+                    if (dishstr.empty())continue;
+                    size_t pos=dishstr.find(':');//利用string的find找到":"分割符号
+                    int dishid=stoi(dishstr.substr(0,pos));
+                    int dishquantity=stoi(dishstr.substr(pos+1));
+                    Dish* dish=menumanager->getdish(dishid);
+                    if (dish) {
+                        od.addfood(dish,dishquantity);
+                    }
+                }
+                 }
+        }
 
-
-
-
-
-
-
-int main() {
-
-
-
-
-
-}
+    }
+};
