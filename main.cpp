@@ -775,6 +775,23 @@ public:
         }
         return results;
     }
+    vector<Order*>getordersbytable(int tablenumber) {//获取一桌的所有订单
+        vector<Order*> results;
+        for (auto &c:orders) {
+            if (c.gettablenumber()==tablenumber) {results.push_back(&c);}
+        }
+            return results;
+    }
+    map<int,int>getdishsalesranking() {//获取菜品销售排行
+        map<int,int>results;
+        for (auto &c:orders) {
+            for (auto &d:c.getorderedfood()) {
+                results[d.first]+=d.second.second;//将下单的菜品在results中累加份数
+            }
+        }
+        return results;
+    }
+
 
     //统计收入
     double calaulatetotalrevenue() {//统计总收入
@@ -799,12 +816,30 @@ public:
         }
         return today;
     }
-    // map<int,int>getdishsalesranking() {
-    //     map<int,int>results;
-    //     for (auto &c:orders) {
-    //         results[c.getorderedfood()->first]+=c.getorderedfood().second.second;
-    //     }
-    // }
+        void displayallordersbytable(int tablenumber) {
+            auto alorders=getordersbytable(tablenumber);
+            if (alorders.empty()){cout<<tablenumber<<"的订单为0"<<endl;return;}
+             cout<<tablenumber<<"的所有订单如下："<<endl;
+            for (auto &c:alorders) {
+                c->displayorder();
+            }
+        }
+
+    void displaydishssalesranking() {
+        auto ranking=getdishsalesranking();
+        cout<<"\n======销量排行======"<<endl;
+        if (ranking.empty()){cout<<"暂无销量数据"<<endl;return;}
+        vector<pair<int,int>>rank(ranking.begin(),ranking.end());//转化为vector便于后面的排序
+        sort(rank.begin(),rank.end(),[](const pair<int,int>&a,const pair<int,int>&b) {
+         return a.second>=b.second;
+        });
+        int rankcount=0;
+        for (auto &c:rank) {
+            cout<<menumanager->getdish(c.first)->name<<"   销量*"<<c.second<<endl;
+        }
+
+
+    }
     void displayordersstatic() {//显示订单数据统计
         int totalcount=orders.size();
         double revenue1=calaulatetotalrevenue();
@@ -825,12 +860,20 @@ public:
             return false;
         }
         fout<<nextid<<endl;
+
         for (auto &c:orders) {
+            string statusstr;
+            if (c.getstatus()==orderstatus::Pending) {statusstr="Pending";}
+            else if (c.getstatus()==orderstatus::Preparing){statusstr="Preparing";}
+            else if (c.getstatus()==orderstatus::Completed) {statusstr="Completed";}
+            else statusstr="Cancelled";
+
             fout<<c.getorderid()<<","
                 <<c.gettablenumber()<<","
+                <<statusstr<<","
                 <<c.gettime()<<endl;
             for (auto& d:c.getorderedfood()) {
-                fout<<d.first<<":"<<d.second.second<<endl;
+                fout<<d.first<<":"<<d.second.second<<";";
             }
             fout<<endl;
         }
@@ -840,42 +883,58 @@ public:
     }
     bool  loadfromfile(string filename="orders.txt") {
         ifstream fin;
+        int loadcount=0;
         fin.open(filename,ios::in);
         if (!fin.is_open()) {
             cout<<"无法打开"<<filename<<endl;
+            return false;
         }
-        orders.clear();
+        orders.clear();//清空订单集合
+
+        //将文件第一行的数据变为id生成器
         string line;
         getline(fin,line);
         nextid=stoi(line);
+
+        //读取订单号。桌号，和订单菜品信息
         int orderid,tablenumber;
         while (getline(fin,line)) {
             if (line.empty())continue;
             stringstream ss(line);
-            string idstr,tablestr,timestr;
+            string idstr,tablestr,timestr,statusstr;
             getline(ss,idstr,',');
             getline(ss,tablestr,',');
             getline(ss,timestr,',');
+            getline(ss,timestr);
+
+            //字符串的转化
             orderid=stoi(idstr);
             tablenumber=stoi(tablestr);
-            orders.emplace_back(orderid,tablenumber);
+            orders.emplace_back(orderid,tablenumber);//在orders订单集里创建订单
             Order& od=orders.back();
+            if (statusstr=="Pending"){od.setstatus(orderstatus::Pending);}
+            else if (statusstr=="Preparing"){od.setstatus(orderstatus::Completed);}
+            else if (statusstr=="completed"){od.setstatus(orderstatus::Canceled);}
+            else od.setstatus(orderstatus::Canceled);
             //读取菜品数据
             if (getline(fin,line)){
                 stringstream ss1(line);
                 string dishstr;
-                while(getline(ss1,dishstr,';')) {
+                while(getline(ss1,dishstr,';')) {//每道菜品由;分割
                     if (dishstr.empty())continue;
-                    size_t pos=dishstr.find(':');//利用string的find找到":"分割符号
-                    int dishid=stoi(dishstr.substr(0,pos));
+                    size_t pos=dishstr.find(':');//利用string的find找到":"分割符号，‘：'分隔了菜品id和菜品份数
+                    int dishid=stoi(dishstr.substr(0,pos));//子字符串为原字符串的位置（0-pos-1）的字符
                     int dishquantity=stoi(dishstr.substr(pos+1));
                     Dish* dish=menumanager->getdish(dishid);
                     if (dish) {
                         od.addfood(dish,dishquantity);
                     }
                 }
-                 }
+            }
+            loadcount++;
         }
-
+        fin.close();
+        cout<<"加载了"<<loadcount<<"订单"<<endl;
+        return true;
     }
 };
