@@ -8,6 +8,7 @@
 #include<sstream>
 #include<chrono>
 #include<iomanip>
+#include <limits>
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -455,7 +456,7 @@ public:
         this->orderid=id;
         this->tablenumber=tablenum;
         createtime=chrono::system_clock::now();
-        status=orderstatus::Pending;
+        status=orderstatus::Pending;//创建订单时初始化订单为待处理状态
     }
     ~Order(){}
     bool addfood(Dish* c,int number) {
@@ -641,17 +642,17 @@ private:string timetostring(chrono::system_clock::time_point time) {
 };
 
 //订单管理类
-class OrderManager {
+class Ordermanager {
 private:
     vector<Order>orders;//储存所有订单的容器
     Menumanager* menumanager;//菜单管理器指针
     int nextid;//订单ID生成器
 public:
-    OrderManager(Menumanager* menumanager) {
+    Ordermanager(Menumanager* menumanager) {
         this->menumanager=menumanager;
         nextid=1;
     }
-    ~OrderManager() {}
+    ~Ordermanager() {}
     //订单管理
     Order* createorder(int tablenumber) {//创建订单
         orders.emplace_back(nextid,tablenumber);//emplace_back()直接在vector中构造，push_back拷贝构造
@@ -714,13 +715,29 @@ public:
 
     //订单状态操作
     bool setorderpreparing(int orderid) {//订单状态设置为准备中
+        if (!getorder(orderid)) {
+            cout<<"该订单后不存在"<<endl;
+            return false;
+        }
         getorder(orderid)->setpreparing();
+        return true;
     }
     bool setorderompleted(int orderid) {//订单状态设置为已完成
-        getorder(orderid)->setcompleted();
+        if (!getorder(orderid)) {
+            cout<<"该订单后不存在"<<endl;
+            return false;
+        }
+         getorder(orderid)->setcompleted();
+        return true;
+
     }
     bool setordercanceled(int orderid) {//订单状态设置为被取消
+        if (!getorder(orderid)) {
+            cout<<"该订单后不存在"<<endl;
+            return false;
+        }
         getorder(orderid)->setcanceled();
+        return true;
     }
 
     //订单查询
@@ -937,4 +954,181 @@ public:
         cout<<"加载了"<<loadcount<<"订单"<<endl;
         return true;
     }
+};
+
+//顾客模式
+class Customermode {
+private:
+    Menumanager* menumanager;
+    Ordermanager* ordermanager;
+    int currentorderid;
+public:
+    Customermode(Menumanager* m,Ordermanager* o,int currentorderid=-1) {//构造函数，需要先构造一个menumanger,ordermanager的实例对象然后传入
+        menumanager=m;
+        ordermanager=o;
+        currentorderid=-1;//默认当前处理订单为-1，即为无待处理订单
+    }
+
+    //订单管理
+    int createneworder(int tablenumber=0) {//创建新订单
+        Order* newod=ordermanager->createorder(tablenumber);//创建了一个ordermanager中的orders(订单集中)中创建了新订单，返回了这个订单的指针
+        if (newod)return newod->getorderid();//查询新订单编号然后返回
+        return -1;//没创建成功就返回-1
+
+    }
+    bool setcurrentorder(int id) {//设置要处理修改的订单
+       Order* od=ordermanager->getorder(id);
+        if (od||od->getstatus()==orderstatus::Pending) {
+            currentorderid=id;//将当前处理的订单设置为id订单
+            return true;
+        }
+        return false;//如果不存在，或是状态不为待处理则不可修改处理
+
+    }
+    int getorderid() {
+        return currentorderid;//将现在处理的订单号返回
+    }
+
+    //菜品操作
+    bool addfood_to_currentorder(int dishid,int quantity=1) {
+        //增添多少份菜品到当天处理的订单中
+        Dish* newds=menumanager->getdish(dishid);//动用menumanager的成员函数查找到与菜品编号相对应的菜
+        Order* od=ordermanager->getorder(currentorderid);//动用ordermanager的成员函数查找到现在处理的订单
+        if (!newds) {//菜品不存在
+            cout<<"菜品"<<dishid<<"不存在"<<endl;
+            return false;
+        }
+        if (!isrevisableorder()) {//当前订单号不可处理
+            //ui设计后面需要让顾客知道是什么原因不可处理，通过getortderid来知道不可处理的原因，orderid=-1就是未初始化处理订单
+            //不为-1，就是该订单处于不能处理阶段，一样需要重新设置处理订单号setcurrentorder;
+            return false;
+        }
+        return ordermanager->addfoodtoorder(currentorderid,dishid,quantity);
+    }
+    bool removefood_from_currentorder(int dishid) {//删除订单特定食物
+        Dish* ds=menumanager->getdish(dishid);
+        if (!ds) {//菜品不存在
+            cout<<"菜品"<<dishid<<"不存在"<<endl;
+            return false;
+        }
+        if (!isrevisableorder()) {//当前订单号不可处理
+            //ui设计后面需要让顾客知道是什么原因不可处理，通过getortderid来知道不可处理的原因，orderid=-1就是未初始化处理订单
+            //不为-1，就是该订单处于不能处理阶段，一样需要重新设置处理订单号setcurrentorder;
+            return false;
+        }
+        return ordermanager->removefoodfromorder(currentorderid,dishid);
+    }
+    bool updatefoodquantity(int dishid,int quantity) {//修改订单食物数量
+        Dish* ds=menumanager->getdish(dishid);
+        if (!ds) {//菜品不存在
+            cout<<"菜品"<<dishid<<"不存在"<<endl;
+            return false;
+        }
+        if (!isrevisableorder()) {//当前订单号不可处理
+            //ui设计后面需要让顾客知道是什么原因不可处理，通过getortderid来知道不可处理的原因，orderid=-1就是未初始化处理订单
+            //不为-1，就是该订单处于不能处理阶段，一样需要重新设置处理订单号setcurrentorder;
+            return false;
+        }
+        ordermanager->removefoodfromorder(currentorderid,dishid);//先移除
+        return ordermanager->addfoodtoorder(currentorderid,dishid,quantity);//再添加
+    }
+
+    //搜索功能
+    vector<Dish*>searchrelateddishes(const string& prefix) {//查找相关食物
+        return menumanager->searchdishes(prefix);//返回的是查找到的食物指针集，指针指向了原食物的位置
+    }
+    vector<Dish*>getdishesbycategory(const string& category) {//根据类名查找该类食物
+        return menumanager->getdishbycategory(category);//返回的是根据类名查找到的该类食物指针集
+    }
+    vector<Dish*>getalldishes() {//获取所有菜品
+        vector<Dish> aldishs=menumanager->getallfood();
+        vector<Dish*>res;
+        for (auto&c:aldishs) {
+            res.push_back(&c);
+        }
+        return res;
+    }
+
+   //订单状态
+    bool submitorder() {//提交订单（设置为准备中)
+        if (!isrevisableorder())return false;
+        ordermanager->getorder(currentorderid)->setstatus(orderstatus::Preparing);
+        currentorderid=-1;//设置当前无处理订单
+        return true;
+    }
+    bool cancelorder() {//取消订单
+        if (!isrevisableorder())return false;
+        ordermanager->getorder(currentorderid)->setstatus(orderstatus::Canceled);
+        currentorderid=-1;//设置当前无处理订单
+        return true;
+    }
+    bool getcurrentorderdetails() {//展示当前订单信息
+        if (!isrevisableorder())return false;
+        Order* od=ordermanager->getorder(currentorderid);
+        od->displayorder();//直接输出显示订单细节
+        return true;
+    }
+    Order* getcurrentorder() {//获取当前订单
+        if (!isrevisableorder())return nullptr;
+       return ordermanager->getorder(currentorderid);
+    }
+    double getcurrentooordertotal() {//获取当前订单价格
+        if (!isrevisableorder())return 0;
+        return ordermanager->getorder(currentorderid)->calaulatetotal();
+    }
+    //信息获取
+    vector<string> getallcategories() {//获取所有食物种类
+      return menumanager->getallcategory();
+    }
+    bool isorderactive() {//检查订单是否活跃，可能有用
+        return currentorderid!=-1;
+    }
+    //清空当前订单(用于界面重置)
+    void clearcurrentorder() {
+        currentorderid=-1;
+    }
+    //获取当前桌号的所有订单（包括历史订单）
+    vector<int>getallordersfortable(int tablenumber) {
+        vector<int> res;
+        if (!ordermanager->getorder(tablenumber)){return res;}
+        vector<Order*>tableorders=ordermanager->getordersbytable(tablenumber);
+        for (auto& c:tableorders) {
+            res.push_back(c->getorderid());
+        }
+        return res;
+    }
+    //获取当前桌号所有可处理订单
+    vector<int>getallrevisableorderfortable(int tablenumber) {
+        vector<int> pendingordersid;
+        if (!ordermanager->getorder(tablenumber)){return pendingordersid;}
+        // 获取该桌号的所有订单
+        vector<Order*> tableorders = ordermanager->getordersbytable(tablenumber);
+
+        // 筛选状态为Pending的订单
+        for (Order* order : tableorders) {
+            if (order && order->getstatus() == orderstatus::Pending) {
+                pendingordersid.push_back(order->getorderid());
+            }
+        }
+
+        // 按订单ID排序（新的在前）
+        std::sort(pendingordersid.begin(), pendingordersid.end(), std::greater<int>());
+
+        return pendingordersid;
+    }
+
+private:
+    bool isrevisableorder() {//检查当前订单号是否可以处理
+    if (currentorderid==-1) return false;//无待处理订单返回false，不可修改处理
+        if (!ordermanager->getorder(currentorderid)||//现在处理的订单号不存在
+            ordermanager->getorder(currentorderid)->getstatus()!=orderstatus::Pending)//现在处理的订单的状态不属于待处理
+            return false;//不可修改
+}
+
+
+
+
+
+
+
 };
