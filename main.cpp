@@ -523,14 +523,16 @@ public:
         return orderedfood.empty();
     }
     bool updatestock() {//更新库存中的菜品数量
-        if (status ==orderstatus::Preparing) {//当前仅当订单状态为制作中才需要减少库存
+        if (status ==orderstatus::Preparing) {//当前订单状态为制作中才需要减少库存，因为此时订单已经不能取消了。
             for (const auto& c:orderedfood) {
                 auto it=c.second.first;
                 it->stock-=c.second.second;
             }
+            cout<<"更新库存成功"<<endl;
+            return true;
         }
-        cout<<"更新库存成功"<<endl;
-        return true;
+        cout<<"该状态下的订单无需更新库存"<<endl;
+        return false;
     }
     double calaulatetotal() {
         //计算总价格
@@ -544,14 +546,15 @@ public:
     orderstatus getstatus() {//获取status,在后面的ordermanager中使用
         return status;
     }
-    void setstatus(orderstatus status) {//设置status,orderstatus使用
+    void setstatus(orderstatus status) {//设置status,orderstatus使用,后面的管理系统都使用该转变订单状态方法，因为只有这个函数才有更新库存功能
         this->status = status;
+        updatestock();
     }
 
     void setpreparing() {//设置订单状态为准备中
             updatestock();
             status=orderstatus::Preparing;
-            cout<<"订单状态变化：食物正在制作中，请您耐心等待"<<endl;
+            cout<<"订单状态变化，菜品正在准备中请您耐心等待"<<endl;
 
     }
     void setcompleted() {//设置订单状态为已完成
@@ -978,7 +981,7 @@ public:
     }
     bool setcurrentorder(int id) {//设置要处理修改的订单
        Order* od=ordermanager->getorder(id);
-        if (od||od->getstatus()==orderstatus::Pending) {
+        if (od&&od->getstatus()==orderstatus::Pending) {
             currentorderid=id;//将当前处理的订单设置为id订单
             return true;
         }
@@ -1072,7 +1075,7 @@ public:
         if (!isrevisableorder())return nullptr;
        return ordermanager->getorder(currentorderid);
     }
-    double getcurrentooordertotal() {//获取当前订单价格
+    double getcurrentordertotal() {//获取当前订单总价格
         if (!isrevisableorder())return 0;
         return ordermanager->getorder(currentorderid)->calaulatetotal();
     }
@@ -1119,11 +1122,185 @@ public:
 
 private:
     bool isrevisableorder() {//检查当前订单号是否可以处理
-    if (currentorderid==-1) return false;//无待处理订单返回false，不可修改处理
-        if (!ordermanager->getorder(currentorderid)||//现在处理的订单号不存在
-            ordermanager->getorder(currentorderid)->getstatus()!=orderstatus::Pending)//现在处理的订单的状态不属于待处理
-            return false;//不可修改
+        if (currentorderid==-1) return false;//无待处理订单返回false，不可修改处理
+        Order* od=ordermanager->getorder(currentorderid);
+        return od&&od->getstatus()==orderstatus::Pending;//判断订单是否存在且订单是否处于待处理状态，如果都是，则可以修改
+
 }
+};
+
+//商家管理模式类
+class Adminmode {
+public:
+    Menumanager* menumanager;
+    Ordermanager* ordermanager;
+
+public:
+    Adminmode(Menumanager* menumanager,Ordermanager* ordermanager) {
+        this->menumanager=menumanager;
+        this->ordermanager=ordermanager;
+    }
+    ~Adminmode(){}
+
+    //菜品管理
+    bool adddish(string name,string category,double price ,int stock,string description) {//增添新菜品
+        return menumanager->addfood(name,category,price,stock,description);
+    }
+    bool removedish(int dishid) {//通过菜品ID移除
+        return menumanager->removefood(dishid);
+    }
+    bool removefood(string dishname) {//通过菜品名字移除
+        return menumanager->removefood(dishname);
+    }
+    bool updatedish(int dishid,string newname,string newcategory,double newprice,int newstock,string newdescription) {//更新菜品信息
+        return menumanager->updatefood(dishid,newname,newcategory,newprice,newstock,newdescription);
+    }
+
+    //菜品查询
+    Dish* getdishbyid(int dishid) {//通过id查询菜品，返回菜品指针
+        return menumanager->getdish(dishid);
+    }
+    Dish* getdishbyname(string name) {//通过菜名查询菜品
+        return menumanager->getdish(name);
+    }
+    vector<Dish>getalldishes() {//获取所有食物集
+        vector<Dish>alldishes;
+        for (auto& c:menumanager->getallfood()) {
+            alldishes.push_back(c);
+        }
+        return alldishes;
+    }
+    vector<Dish*>getalldishesbycategory(string category) {//获取一个类的相关菜品
+        return menumanager->getdishbycategory(category);
+    }
+    vector<Dish*>searchdishes(string prefix) {//根据前缀查询相关菜品
+        return menumanager->searchdishes(prefix);
+    }
+
+    //分类管理
+    vector<string>getallgategories() {//获取所有种类
+        return menumanager->getallcategory();
+    }
+    bool iscategoryexits(string category) {//查找类是否存在
+        return menumanager->iskindexit(category);
+    }
+    int getdishcountincategory(string category) {//查询特定类的菜品总数
+        return menumanager->getnumberinonekind(category);
+    }
+
+    //==订单管理办法==
+
+    //订单查询
+    vector<Order*>getallorders() {//获取所有订单集
+        return ordermanager->getallorders();
+    }
+    vector<Order*>getordersbystatus(orderstatus status) {//获取特定状态的订单集
+        return ordermanager->getordersbystatus(status);
+    }
+    vector<Order*>getordersbytable(int tablenumber) {//通过桌号查询订单
+        return ordermanager->getordersbytable(tablenumber);
+    }
+    vector<Order*>getPendingorders() {//获取待处理订单
+        return ordermanager->getpendingorders();
+    }
+    vector<Order*>getPreparingorders() {//获取正在准备的订单
+        return ordermanager->getpreparingorders();
+    }
+    vector<Order*>getCompletedorders() {//获取已完成订单
+        return ordermanager->getcompletedorders();
+    }
+    vector<Order*>getCanceledorders() {//获取被取消的订单
+        return ordermanager->getcanceledorders();
+    }
+    Order* getorderbyid(int orderid) {//通过订单号获取特定订单
+        return ordermanager->getorder(orderid);
+    }
+    //订单操作
+    bool updateorderstatus(int orderid,orderstatus newstatus) {//更新订单状态
+        Order* od=ordermanager->getorder(orderid);
+        if (!od)return false;
+        if (newstatus==orderstatus::Pending||newstatus==orderstatus::Preparing||newstatus==orderstatus::Completed||
+            newstatus==orderstatus::Canceled) {
+            od->setstatus(newstatus);
+        }
+        else {
+            cout<<"菜单状态设置不成功，设置状态有误！"<<endl;
+            return false;
+        }
+
+        if (od->getstatus()==newstatus)return true;
+    }
+    bool deleteorder(int orderid) {//删除订单
+      return ordermanager->deleteorder(orderid);
+    }
+
+    //==统计分析方法
+    //销售统计
+    double gettotalrevenue() {//计算总收入
+        return ordermanager->calaulatetotalrevenue();
+    }
+    double gettodayrevenue() {//计算今日收入
+        return ordermanager->calculattodayrevenue();
+    }
+    int gettotalorderscount() {//获取所有订单数
+        return ordermanager->getallorders().size();
+    }
+    int gettodayorderscoumt() {//获取当日订单数
+        int today=0;
+        auto time=chrono::system_clock::now();
+        time_t now=chrono::system_clock::to_time_t(time);
+        tm t1;
+        localtime_s(&t1,&now);
+        stringstream ss;
+        ss<<put_time(&t1,"%Y:%m:%d");
+        for (auto &c:(ordermanager->getallorders())) {
+            if (c->gettime().find(ss.str())!=string::npos) {//查找订单时间是否存在今日日期字符串
+                today++;
+            }
+        }
+        return today;
+    }
+
+    //菜品统计
+    map<int,int>getdishranking() {//获取订单排行map
+        return ordermanager->getdishsalesranking();
+    }
+    void getsalesranking() {//展示销量排行
+        ordermanager->displaydishssalesranking();
+    }
+
+    //菜单统计
+   int gettotaldishcoount() {//获取菜单菜品总数
+        return menumanager->getallfoodnum();
+    }
+    int getcategorycount() {//获取菜单的种类数
+        return menumanager->getallcategorynum();
+    }
+    void getcategorywithnum(map<std::string, int>& stats) {//获取一个存储类名和类菜品数的map
+        auto cates=menumanager->getallcategory();
+        for (auto& c:cates) {
+            stats[c]=menumanager->getnumberinonekind(c);
+        }
+    }
+
+    //数据持久化
+    bool savamenudate(string filename="food.txt") {
+        return menumanager->savetofile(filename);
+    }
+    bool loadmenudate(string filename="food.txt") {
+        return menumanager->loadfromfile(filename);
+    }
+    bool saveorderdate(string filename="orders.txt") {
+        return ordermanager->savetofile(filename);
+    }
+    bool loadorderdate(string filename="orders.txt") {
+        return ordermanager->loadfromfile(filename);
+    }
+
+
+
+
+
 
 
 
